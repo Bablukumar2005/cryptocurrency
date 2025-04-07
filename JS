@@ -1,0 +1,219 @@
+const GEMINI_API_KEY = 'AIzaSyBnb1Q3ba3SUOYO-v2Ng7onneCJEmSy8aU'; // Google Gemini API key (verify this is valid)
+const COINMARKETCAP_API_KEY = '149892e2-337c-4312-87a1-5f61e8fe65dd'; // Replace with your CoinMarketCap API key
+let portfolio = {}; // User's cryptocurrency portfolio { coinId: amount }
+
+// Function to fetch crypto prices from CoinGecko API
+async function fetchCryptoPrices(coinIds) {
+    try {
+        const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinIds.join(',')}&vs_currencies=usd`);
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('CoinGecko API Error:', error);
+        return null;
+    }
+}
+
+// Function to fetch detailed crypto data from CoinMarketCap API
+async function fetchCryptoPortfolioData(symbols) {
+    try {
+        const response = await fetch(`https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=${symbols.join(',')}`, {
+            headers: {
+                'X-CMC_PRO_API_KEY': COINMARKETCAP_API_KEY,
+                'Accept': 'application/json'
+            }
+        });
+        const data = await response.json();
+        if (data.status.error_code) throw new Error(data.status.error_message);
+        return data.data;
+    } catch (error) {
+        console.error('CoinMarketCap API Error:', error);
+        return null;
+    }
+}
+
+// Function to find the crypto with the highest price
+function findHighestPriceCrypto(prices) {
+    let highestPrice = 0;
+    let highestCrypto = '';
+    for (const coin in prices) {
+        const price = prices[coin].usd || 0;
+        if (price > highestPrice) {
+            highestPrice = price;
+            highestCrypto = coin;
+        }
+    }
+    return { coin: highestCrypto, price: highestPrice };
+}
+
+// Function to calculate portfolio value using CoinMarketCap data
+async function calculatePortfolioValue() {
+    if (Object.keys(portfolio).length === 0) return 0;
+    const symbols = Object.keys(portfolio).map(coin => coin.toUpperCase());
+    const data = await fetchCryptoPortfolioData(symbols);
+    return Object.entries(portfolio).reduce(async (totalPromise, [coinId, amount]) => {
+        const total = await totalPromise;
+        const symbol = coinId.toUpperCase();
+        return data && data[symbol] && data[symbol].quote.USD.price ? total + (data[symbol].quote.USD.price * amount) : total;
+    }, Promise.resolve(0));
+}
+
+// Function to fetch detailed crypto information
+async function fetchCryptoDetails(coinId) {
+    const chatBox = document.getElementById('chatBox');
+    chatBox.innerHTML += `<p class="ai-message">AI: Fetching details for ${coinId}...</p>`;
+    chatBox.scrollTop = chatBox.scrollHeight;
+
+    const prices = await fetchCryptoPrices([coinId]);
+    const cmcData = await fetchCryptoPortfolioData([coinId.toUpperCase()]);
+    if (prices && prices[coinId] && cmcData && cmcData[coinId.toUpperCase()]) {
+        const price = prices[coinId].usd;
+        const cmcInfo = cmcData[coinId.toUpperCase()];
+        const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        chatBox.innerHTML += `<p class="ai-message">AI: Crypto Details for ${coinId} (as of ${today}):\n` +
+            `Current Price: USD ${price.toFixed(2)}\n` +
+            `Market Cap: USD ${(cmcInfo.quote.USD.market_cap / 1e9).toFixed(2)} Billion\n` +
+            `24h Volume: USD ${(cmcInfo.quote.USD.volume_24h / 1e6).toFixed(2)} Million\n` +
+            `Note: Prices are volatile. Add ${coinId} to your portfolio with 'Add 2 ${coinId}'!</p>`;
+        chatBox.scrollTop = chatBox.scrollHeight;
+    } else {
+        chatBox.innerHTML += `<p class="ai-message">AI: No data found for ${coinId}. Please use a valid crypto (e.g., 'bitcoin', 'ethereum').</p>`;
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+}
+
+async function sendMessage() {
+    const chatInput = document.getElementById('chatInput');
+    const message = chatInput.value.trim();
+    if (!message) return;
+
+    const chatBox = document.getElementById('chatBox');
+    chatBox.innerHTML += `<p class="user-message">You: ${message}</p>`;
+    chatInput.value = '';
+    chatBox.scrollTop = chatBox.scrollHeight;
+
+    // Developer-related queries
+    const lowerMessage = message.toLowerCase();
+    if ((lowerMessage.includes('who') || lowerMessage.includes('whose')) && 
+        (lowerMessage.includes('developer') || lowerMessage.includes('made') || lowerMessage.includes('make') || lowerMessage.includes('created') || lowerMessage.includes('built'))) {
+        chatBox.innerHTML += `<p class="ai-message">AI: I was created by Gautam, Mayank, and Pankaj. Nice to manage your crypto with you!</p>`;
+        chatBox.scrollTop = chatBox.scrollHeight;
+        return;
+    }
+
+    // Portfolio and crypto detection logic
+    const isPriceQuery = lowerMessage.includes('price');
+    const isPortfolioQuery = lowerMessage.includes('portfolio') || lowerMessage.includes('add') || lowerMessage.includes('remove') || lowerMessage.includes('show');
+    const isCryptoQuery = lowerMessage.includes('bitcoin') || lowerMessage.includes('ethereum') || lowerMessage.includes('binancecoin') || 
+                         lowerMessage.includes('solana') || lowerMessage.includes('cardano') || lowerMessage.includes('ripple') || 
+                         lowerMessage.includes('dogecoin') || lowerMessage.includes('polkadot');
+
+    if (isCryptoQuery && isPriceQuery) {
+        const coinId = lowerMessage.includes('bitcoin') ? 'bitcoin' :
+                      lowerMessage.includes('ethereum') ? 'ethereum' :
+                      lowerMessage.includes('binancecoin') ? 'binancecoin' :
+                      lowerMessage.includes('solana') ? 'solana' :
+                      lowerMessage.includes('cardano') ? 'cardano' :
+                      lowerMessage.includes('ripple') ? 'ripple' :
+                      lowerMessage.includes('dogecoin') ? 'dogecoin' :
+                      lowerMessage.includes('polkadot') ? 'polkadot' : null;
+        if (coinId) await fetchCryptoDetails(coinId);
+        else {
+            chatBox.innerHTML += `<p class="ai-message">AI: Please specify a valid crypto (e.g., 'Bitcoin price').</p>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    } else if (isPortfolioQuery) {
+        if (lowerMessage.includes('add')) {
+            const match = lowerMessage.match(/add\s+(\d*\.?\d+)\s+(\w+)/);
+            if (match) {
+                const amount = parseFloat(match[1]);
+                const coinId = match[2].toLowerCase();
+                if (amount > 0 && ['bitcoin', 'ethereum', 'binancecoin', 'solana', 'cardano', 'ripple', 'dogecoin', 'polkadot'].includes(coinId)) {
+                    portfolio[coinId] = (portfolio[coinId] || 0) + amount;
+                    chatBox.innerHTML += `<p class="ai-message">AI: Added ${amount} ${coinId} to your portfolio. Use 'Show portfolio' to see the value!</p>`;
+                } else {
+                    chatBox.innerHTML += `<p class="ai-message">AI: Invalid amount or coin. Use format 'Add 2 Bitcoin' with valid coins.</p>`;
+                }
+            } else {
+                chatBox.innerHTML += `<p class="ai-message">AI: Use format 'Add 2 Bitcoin' to add to your portfolio.</p>`;
+            }
+        } else if (lowerMessage.includes('remove')) {
+            const match = lowerMessage.match(/remove\s+(\d*\.?\d+)\s+(\w+)/);
+            if (match) {
+                const amount = parseFloat(match[1]);
+                const coinId = match[2].toLowerCase();
+                if (portfolio[coinId] && portfolio[coinId] >= amount) {
+                    portfolio[coinId] -= amount;
+                    if (portfolio[coinId] === 0) delete portfolio[coinId];
+                    chatBox.innerHTML += `<p class="ai-message">AI: Removed ${amount} ${coinId} from your portfolio. Use 'Show portfolio' to check!</p>`;
+                } else {
+                    chatBox.innerHTML += `<p class="ai-message">AI: Invalid amount or coin not in portfolio. Check with 'Show portfolio'.</p>`;
+                }
+            } else {
+                chatBox.innerHTML += `<p class="ai-message">AI: Use format 'Remove 1 Bitcoin' to remove from your portfolio.</p>`;
+            }
+        } else if (lowerMessage.includes('show portfolio') || lowerMessage.includes('portfolio value')) {
+            const totalValue = await calculatePortfolioValue();
+            const holdings = Object.entries(portfolio).map(([coin, amount]) => `${coin}: ${amount}`).join(', ');
+            const data = await fetchCryptoPortfolioData(Object.keys(portfolio).map(coin => coin.toUpperCase()));
+            let portfolioBreakdown = '';
+            if (data) {
+                portfolioBreakdown = Object.entries(portfolio).map(([coinId, amount]) => {
+                    const symbol = coinId.toUpperCase();
+                    const price = data[symbol]?.quote.USD.price || 0;
+                    const value = price * amount;
+                    return `${coinId}: ${amount} @ USD ${price.toFixed(2)} = USD ${value.toFixed(2)}`;
+                }).join('\n');
+            }
+            chatBox.innerHTML += `<p class="ai-message">AI: Your Portfolio:\n${portfolioBreakdown || 'Holdings: None'}\nTotal Value: USD ${totalValue.toFixed(2)}\nNote: Values are based on CoinMarketCap prices.</p>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+        } else if (lowerMessage.includes('highest price')) {
+            const coinIds = ['bitcoin', 'ethereum', 'binancecoin', 'solana', 'cardano', 'ripple', 'dogecoin', 'polkadot'];
+            const prices = await fetchCryptoPrices(coinIds);
+            if (prices) {
+                const highest = findHighestPriceCrypto(prices);
+                chatBox.innerHTML += `<p class="ai-message">AI: The crypto with the highest price is ${highest.coin} at USD ${highest.price.toFixed(2)}!</p>`;
+            } else {
+                chatBox.innerHTML += `<p class="ai-message">AI: Couldn’t fetch highest price data. Try again later!</p>`;
+            }
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    } else {
+        // General chat with Gemini API
+        try {
+            const response = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [{
+                                text: `You are a friendly cryptocurrency portfolio manager chatbot created by Gautam, Mayank, and Pankaj. Answer the following question naturally and informatively, focusing on cryptocurrency and portfolio management if relevant: "${message}". If unrelated, suggest asking about crypto prices (e.g., 'Bitcoin price') or portfolio actions (e.g., 'Add 2 Bitcoin').`
+                            }]
+                        }]
+                    })
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            const aiResponse = data.candidates[0].content.parts[0].text;
+            chatBox.innerHTML += `<p class="ai-message">AI: ${aiResponse}</p>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+        } catch (error) {
+            console.error('Gemini API error:', error);
+            chatBox.innerHTML += `<p class="ai-message">AI: Oops! I couldn’t process that with the Gemini API. Try asking about crypto (e.g., 'Bitcoin price') or portfolio (e.g., 'Show portfolio')!</p>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    }
+}
+
+document.getElementById('chatInput').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendMessage();
+});
